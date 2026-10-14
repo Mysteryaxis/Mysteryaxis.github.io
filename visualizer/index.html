@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>Pulse Visualizer</title>
+  <meta name="description" content="A music visualizer for iPhone that reacts to the audio around you or to music files on your device.">
+  <meta name="theme-color" content="#05060a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Pulse">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="stage"></canvas>
+  <div id="hud" hidden></div>
+  <div id="toast"></div>
+
+  <!-- START SCREEN -->
+  <section id="start" class="overlay">
+    <div class="start-card">
+      <div class="logo" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+      <h1>Pulse</h1>
+      <p class="sub">A music visualizer that moves with your sound.</p>
+      <button class="btn primary big" id="start-mic">🎤 Listen with microphone</button>
+      <button class="btn big" id="start-file">🎵 Play music files</button>
+      <details class="help">
+        <summary>Which should I pick?</summary>
+        <p><b>Microphone</b> picks up whatever is playing out loud: your iPhone speaker, a Bluetooth speaker, a TV or a live band. Works with Spotify, Apple Music, YouTube and anything else.</p>
+        <p><b>Music files</b> plays songs from the Files app (MP3, M4A, WAV, AAC…) and is analysed directly, so it's in perfect sync and works with headphones.</p>
+        <p>iOS doesn't let any app read audio from other apps directly, so streaming apps work through the microphone.</p>
+        <p>Tip: tap <b>Share → Add to Home Screen</b> to use Pulse full screen like a regular app.</p>
+      </details>
+    </div>
+  </section>
+
+  <!-- CONTROL BAR -->
+  <nav id="controls" class="hidden">
+    <div id="player" hidden>
+      <div class="track"><span id="track-title">—</span><span id="track-time">0:00</span></div>
+      <input type="range" id="seek" min="0" max="1000" value="0" aria-label="Seek">
+    </div>
+    <div class="bar">
+      <button class="icon" id="btn-source" aria-label="Change audio source">🎤</button>
+      <button class="icon" id="btn-prev-mode" aria-label="Previous visualization">‹</button>
+      <button class="mode-name" id="btn-mode"><span id="mode-label">Bars</span></button>
+      <button class="icon" id="btn-next-mode" aria-label="Next visualization">›</button>
+      <span class="spacer" id="file-btns" hidden>
+        <button class="icon" id="btn-prev-track" aria-label="Previous track">⏮</button>
+        <button class="icon" id="btn-play" aria-label="Play or pause">⏸</button>
+        <button class="icon" id="btn-next-track" aria-label="Next track">⏭</button>
+      </span>
+      <button class="icon" id="btn-settings" aria-label="Settings">⚙︎</button>
+    </div>
+  </nav>
+
+  <!-- SOURCE PICKER -->
+  <section id="source-sheet" class="sheet" hidden>
+    <div class="sheet-head"><h2>Audio source</h2><button class="icon close" data-close aria-label="Close">✕</button></div>
+    <button class="btn big primary" id="src-mic">🎤 Microphone</button>
+    <button class="btn big" id="src-file">🎵 Choose music files…</button>
+    <p class="note">Streaming apps (Spotify, Apple Music, YouTube) can't be read directly on iOS. Play them out loud and use the microphone, or open downloaded files for exact sync.</p>
+  </section>
+
+  <!-- SETTINGS -->
+  <section id="settings-sheet" class="sheet tall" hidden>
+    <div class="sheet-head"><h2>Settings</h2><button class="icon close" data-close aria-label="Close">✕</button></div>
+    <div id="settings-body"></div>
+    <button class="btn" id="reset-settings">Reset to defaults</button>
+  </section>
+
+  <div id="scrim" hidden></div>
+  <div id="mic-error" class="overlay" hidden>
+    <div class="start-card">
+      <h1>Microphone blocked</h1>
+      <p class="sub" id="mic-error-text"></p>
+      <button class="btn primary big" id="mic-error-ok">OK</button>
+    </div>
+  </div>
+
+  <input type="file" id="file-input" accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg,.aif,.aiff" multiple hidden>
+  <audio id="audio" playsinline preload="auto"></audio>
+
+  <script src="app.js"></script>
+</body>
+</html>

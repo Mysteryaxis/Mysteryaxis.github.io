@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>Hanzi Daily</title>
+  <meta name="description" content="Learn Mandarin Chinese with spaced-repetition flashcards, quizzes, tones and stroke order.">
+  <meta name="theme-color" content="#c82828">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Hanzi">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1 id="title">Hanzi Daily</h1>
+  </header>
+
+  <main id="main">
+    <!-- HOME -->
+    <section id="view-home" class="view active">
+      <div class="stats">
+        <div class="stat"><b id="stat-due">0</b><span>due</span></div>
+        <div class="stat"><b id="stat-new">0</b><span>new today</span></div>
+        <div class="stat"><b id="stat-learned">0</b><span>learned</span></div>
+        <div class="stat"><b id="stat-streak">0</b><span>day streak</span></div>
+      </div>
+      <button class="btn primary big" id="start-review">Start review</button>
+      <div class="card-panel">
+        <h2>Progress</h2>
+        <div id="deck-progress"></div>
+      </div>
+      <div class="card-panel">
+        <h2>Settings</h2>
+        <label class="row">New cards per day
+          <select id="set-newPerDay">
+            <option>5</option><option>10</option><option>15</option><option>20</option><option>30</option>
+          </select>
+        </label>
+        <label class="row">Card direction
+          <select id="set-direction">
+            <option value="zh-en">Chinese → English</option>
+            <option value="en-zh">English → Chinese</option>
+            <option value="mixed">Mixed</option>
+          </select>
+        </label>
+        <label class="row">Show pinyin on front
+          <input type="checkbox" id="set-pinyinFront">
+        </label>
+        <label class="row">Auto-play audio
+          <input type="checkbox" id="set-autoplay">
+        </label>
+        <label class="row">Speech speed
+          <input type="range" id="set-rate" min="0.5" max="1.2" step="0.1">
+        </label>
+        <div class="row">Decks
+          <span id="set-decks" class="deck-toggles"></span>
+        </div>
+        <button class="btn danger small" id="reset">Reset all progress</button>
+      </div>
+      <p class="hint" id="install-hint">Tip: in Safari, tap the Share button, then <b>Add to Home Screen</b>, to install this as an app. It also works offline.</p>
+    </section>
+
+    <!-- REVIEW -->
+    <section id="view-review" class="view">
+      <div class="progressbar"><div id="review-bar"></div></div>
+      <div id="review-card" class="flashcard">
+        <div class="fc-front"></div>
+        <div class="fc-back hidden"></div>
+      </div>
+      <div id="review-actions">
+        <button class="btn primary big" id="reveal">Show answer</button>
+        <div class="grades hidden" id="grades">
+          <button class="btn g-again" data-grade="0">Again<small id="iv0"></small></button>
+          <button class="btn g-hard" data-grade="1">Hard<small id="iv1"></small></button>
+          <button class="btn g-good" data-grade="2">Good<small id="iv2"></small></button>
+          <button class="btn g-easy" data-grade="3">Easy<small id="iv3"></small></button>
+        </div>
+      </div>
+      <div id="review-done" class="done hidden">
+        <div class="done-emoji">🎉</div>
+        <h2>All done for now!</h2>
+        <p>Come back later for more reviews, or try a quiz.</p>
+        <button class="btn primary" data-goto="quiz">Take a quiz</button>
+        <button class="btn" id="more-new">Learn 5 more new words</button>
+      </div>
+    </section>
+
+    <!-- QUIZ -->
+    <section id="view-quiz" class="view">
+      <div id="quiz-setup">
+        <h2>Quiz</h2>
+        <p class="hint">10 multiple-choice questions.</p>
+        <div class="mode-grid">
+          <button class="btn mode" data-mode="meaning">字 → Meaning</button>
+          <button class="btn mode" data-mode="hanzi">Meaning → 字</button>
+          <button class="btn mode" data-mode="listen">🔊 Listening</button>
+          <button class="btn mode" data-mode="pinyin">字 → Pinyin</button>
+          <button class="btn mode wide" data-mode="mixed">Mixed</button>
+        </div>
+        <label class="row">Only words I've studied
+          <input type="checkbox" id="quiz-learned">
+        </label>
+      </div>
+      <div id="quiz-play" class="hidden">
+        <div class="progressbar"><div id="quiz-bar"></div></div>
+        <div id="quiz-prompt" class="quiz-prompt"></div>
+        <div id="quiz-options" class="options"></div>
+        <button class="btn primary big hidden" id="quiz-next">Next</button>
+      </div>
+      <div id="quiz-result" class="done hidden">
+        <div class="done-emoji" id="quiz-emoji"></div>
+        <h2 id="quiz-score"></h2>
+        <div id="quiz-missed"></div>
+        <button class="btn primary" id="quiz-again">Play again</button>
+      </div>
+    </section>
+
+    <!-- WORDS -->
+    <section id="view-words" class="view">
+      <input type="search" id="word-search" placeholder="Search 字, pinyin or English" autocomplete="off">
+      <div class="seg" id="word-filter">
+        <button data-f="all" class="on">All</button>
+        <button data-f="new">New</button>
+        <button data-f="learning">Learning</button>
+        <button data-f="known">Known</button>
+      </div>
+      <ul id="word-list" class="word-list"></ul>
+    </section>
+
+    <!-- WRITE -->
+    <section id="view-write" class="view">
+      <div class="write-top">
+        <input type="text" id="write-input" placeholder="Type characters, e.g. 你好" lang="zh">
+        <button class="btn small" id="write-random">Random</button>
+      </div>
+      <div id="write-info" class="write-info"></div>
+      <div id="write-chars" class="write-chars"></div>
+      <div class="write-actions">
+        <button class="btn" id="write-animate">▶ Stroke order</button>
+        <button class="btn primary" id="write-quiz">✍️ Practice</button>
+        <button class="btn" id="write-outline">Outline</button>
+      </div>
+      <p class="hint" id="write-msg">Tap a character to select it. In practice mode, trace each stroke in order with your finger.</p>
+    </section>
+
+    <!-- TONES -->
+    <section id="view-tones" class="view">
+      <div class="card-panel">
+        <h2>The four tones</h2>
+        <div class="tones">
+          <button class="tone t1" data-say="妈"><b>mā</b><span>1st · high & flat</span><i>妈 mom</i></button>
+          <button class="tone t2" data-say="麻"><b>má</b><span>2nd · rising</span><i>麻 hemp</i></button>
+          <button class="tone t3" data-say="马"><b>mǎ</b><span>3rd · dip then rise</span><i>马 horse</i></button>
+          <button class="tone t4" data-say="骂"><b>mà</b><span>4th · sharp fall</span><i>骂 scold</i></button>
+        </div>
+        <p class="hint">The neutral (5th) tone is short and light, like the second syllable of 妈妈 <span class="t5">ma</span>. Colors used throughout the app match these tones.</p>
+      </div>
+      <div class="card-panel">
+        <h2>Tone trainer</h2>
+        <p class="hint">Listen and pick the tone. <span id="tone-score"></span></p>
+        <button class="btn primary big" id="tone-play">🔊 Play</button>
+        <div class="tone-answers">
+          <button class="btn t1b" data-tone="1">1 ˉ</button>
+          <button class="btn t2b" data-tone="2">2 ˊ</button>
+          <button class="btn t3b" data-tone="3">3 ˇ</button>
+          <button class="btn t4b" data-tone="4">4 ˋ</button>
+        </div>
+        <div id="tone-feedback" class="tone-feedback"></div>
+      </div>
+      <div class="card-panel">
+        <h2>Tone rules</h2>
+        <ul class="rules">
+          <li><b>3 + 3 → 2 + 3:</b> 你好 is said <i>ní hǎo</i>.</li>
+          <li><b>不 bù</b> becomes <b>bú</b> before a 4th tone: 不对 <i>bú duì</i>.</li>
+          <li><b>一 yī</b> becomes <b>yí</b> before a 4th tone (一个 <i>yí gè</i>) and <b>yì</b> before others (一点 <i>yì diǎn</i>).</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <nav class="tabbar">
+    <button data-goto="home" class="on"><span>🏠</span>Home</button>
+    <button data-goto="review"><span>🃏</span>Review</button>
+    <button data-goto="quiz"><span>❓</span>Quiz</button>
+    <button data-goto="words"><span>📖</span>Words</button>
+    <button data-goto="write"><span>✍️</span>Write</button>
+    <button data-goto="tones"><span>🎵</span>Tones</button>
+  </nav>
+
+  <div id="modal" class="modal hidden">
+    <div class="sheet">
+      <button class="close" id="modal-close" aria-label="Close">✕</button>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="vocab.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

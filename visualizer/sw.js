@@ -1,5 +1,5 @@
 // Offline support: the whole app is a handful of static files, cached up front.
-const SHELL = "pulse-shell-v2";
+const SHELL = "pulse-shell-v3";
 const FILES = ["./", "index.html", "style.css", "app.js", "manifest.webmanifest", "icons/icon-180.png", "icons/icon-192.png", "icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {

@@ -75,7 +75,10 @@ function gradient(ctx, x0, y0, x1, y1, alpha = 1) {
 // - the iOS audio session type is only changed while no graph is running, since
 //   changing it underneath a running context can interrupt it;
 // - each analyser feeds a muted gain into the speakers, because WebKit only
-//   processes nodes that lead to the destination.
+//   processes nodes that lead to the destination;
+// - the mic graph is never resumed automatically: on iPhone only one app can hold
+//   audio while the mic is on, so grabbing it back would pause Spotify & co.
+//   Interruptions are shown in a banner and the user decides.
 const AC = window.AudioContext || window.webkitAudioContext;
 const audioEl = $("#audio");
 let micGraph = null, fileGraph = null, micStream = null;
@@ -94,7 +97,11 @@ function makeGraph() {
   mute.gain.value = 0;
   an.connect(mute);
   mute.connect(ctx.destination);
-  ctx.onstatechange = () => { if (ctx === actx && ctx.state !== "running" && ctx.state !== "closed") resumeAudio(); };
+  ctx.onstatechange = () => {
+    if (ctx !== actx || ctx.state === "running" || ctx.state === "closed") return;
+    if (source === "file") resumeAudio();
+    else if (source === "mic") micInterrupted();
+  };
   return { ctx, an };
 }
 
@@ -136,11 +143,43 @@ async function useMic() {
   micGraph = makeGraph();
   micGraph.ctx.createMediaStreamSource(micStream).connect(micGraph.an); // analysed only, never played back
   activate(micGraph);
-  micStream.getAudioTracks().forEach((t) => t.addEventListener("ended", () => {
-    if (source === "mic") toast("Microphone stopped — tap 🎤 to restart");
-  }));
+  micStream.getAudioTracks().forEach((t) => {
+    t.addEventListener("mute", micInterrupted);
+    t.addEventListener("unmute", () => { if (actx && actx.state === "running") hideBanner(); });
+    t.addEventListener("ended", micEnded);
+  });
   setSource("mic");
   return true;
+}
+
+function micInterrupted() {
+  if (source !== "mic") return;
+  showBanner(
+    "Listening paused because another app (like Spotify) is playing. iPhone only lets one app use audio while the microphone is on. " +
+    "Tap here to resume — this will pause the other app. To use both, play the music on another device.",
+    restartMic
+  );
+}
+
+function micEnded() {
+  if (source !== "mic") return;
+  showBanner("The microphone turned off (iPhone stops it when Pulse is in the background). Tap here to turn it back on.", restartMic);
+}
+
+async function restartMic() {
+  stopMic();
+  source = null;
+  await useMic();
+}
+
+function micAlive() {
+  return micStream && micStream.getAudioTracks().some((t) => t.readyState === "live" && !t.muted);
+}
+
+if (navigator.audioSession) {
+  navigator.audioSession.addEventListener?.("statechange", () => {
+    if (navigator.audioSession.state === "interrupted") micInterrupted();
+  });
 }
 
 function stopMic() {
@@ -165,7 +204,7 @@ function prepareFileAudio() {
 function setSource(kind) {
   source = kind;
   silentSince = 0;
-  $("#no-sound").hidden = true;
+  hideBanner();
   $("#btn-source").textContent = kind === "mic" ? "🎤" : "🎵";
   $("#player").hidden = $("#file-btns").hidden = kind !== "file";
   requestWakeLock();
@@ -339,29 +378,34 @@ function analyse(now) {
   }
 }
 
+let bannerAction = null;
+function showBanner(text, action) {
+  $("#no-sound-text").textContent = text;
+  bannerAction = action;
+  $("#no-sound").hidden = false;
+}
+function hideBanner() { $("#no-sound").hidden = true; bannerAction = null; }
+$("#no-sound").addEventListener("click", () => {
+  const act = bannerAction;
+  hideBanner();
+  silentSince = 0;
+  if (act) act();
+});
+
 // If nothing reaches the analyser for a while, say so instead of sitting there flat.
 function checkSilence(level, now) {
   const expectSound = source === "mic" || (source === "file" && !audioEl.paused);
   if (!expectSound || level > 0.002) {
     silentSince = 0;
-    if (!$("#no-sound").hidden && level > 0.002) $("#no-sound").hidden = true;
+    if (!$("#no-sound").hidden && level > 0.002) hideBanner();
     return;
   }
   if (!silentSince) silentSince = now;
-  if (now - silentSince > 4000 && $("#no-sound").hidden) {
-    $("#no-sound-text").textContent = source === "mic"
-      ? "No sound is reaching the microphone. Turn the music up and hold the phone near the speaker, or tap here to restart the mic."
-      : "The song is playing but no sound is reaching the visualizer. Tap here to retry.";
-    $("#no-sound").hidden = false;
-  }
+  if (now - silentSince < 4000 || !$("#no-sound").hidden) return;
+  if (source === "mic" && !micAlive()) micInterrupted();
+  else if (source === "mic") showBanner("No sound is reaching the microphone. Turn the music up and hold the phone near the speaker.", null);
+  else showBanner("The song is playing but no sound is reaching the visualizer. Tap here to retry.", () => { resumeAudio(); if (audioEl.paused) playAudio(); });
 }
-
-$("#no-sound").addEventListener("click", async () => {
-  $("#no-sound").hidden = true;
-  silentSince = 0;
-  if (source === "mic") { stopMic(); source = null; await useMic(); }
-  else { resumeAudio(); if (audioEl.paused) playAudio(); }
-});
 
 /* ---------------- Canvas ---------------- */
 
@@ -924,12 +968,17 @@ async function requestWakeLock() {
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
-    resumeAudio();
+    if (source === "file") resumeAudio();
+    else if (source === "mic" && !micAlive()) {
+      if (micStream && micStream.getAudioTracks().some((t) => t.readyState === "live")) micInterrupted();
+      else micEnded();
+    }
     requestWakeLock();
   }
 });
 // iOS can suspend the context after interruptions (calls, Siri); a tap brings it back.
-document.addEventListener("pointerdown", resumeAudio);
+// File playback only: for the mic this would take the audio back from Spotify on every tap.
+document.addEventListener("pointerdown", () => { if (source === "file") resumeAudio(); });
 
 buildSettings();
 setMode(S.mode, false);

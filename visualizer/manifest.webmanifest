@@ -1,0 +1,16 @@
+{
+  "name": "Pulse — Music Visualizer",
+  "short_name": "Pulse",
+  "description": "A music visualizer that reacts to the audio around you or to music files on your device.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#05060a",
+  "theme_color": "#05060a",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

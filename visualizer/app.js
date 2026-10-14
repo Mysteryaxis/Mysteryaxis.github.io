@@ -66,68 +66,106 @@ function gradient(ctx, x0, y0, x1, y1, alpha = 1) {
 
 /* ---------------- Audio ---------------- */
 
+// iOS Safari is picky about audio, so the mic and the file player each get their
+// own AudioContext ("graph"):
+// - the mic graph is created *after* the microphone is granted, so it runs at the
+//   mic's sample rate and in the play-and-record session (one created earlier can
+//   end up analysing silence once iOS switches the session for the mic);
+// - the file graph is created inside a tap, after the session is set to playback;
+// - the iOS audio session type is only changed while no graph is running, since
+//   changing it underneath a running context can interrupt it;
+// - each analyser feeds a muted gain into the speakers, because WebKit only
+//   processes nodes that lead to the destination.
+const AC = window.AudioContext || window.webkitAudioContext;
 const audioEl = $("#audio");
-let actx = null, analyser = null, micSource = null, micStream = null, fileSource = null;
+let micGraph = null, fileGraph = null, micStream = null;
+let actx = null, analyser = null; // whichever graph is active
 let freqBytes, timeFloats, bandMap = null;
 let source = null; // "mic" | "file"
 
-function ensureAudio() {
-  if (!actx) {
-    actx = new (window.AudioContext || window.webkitAudioContext)();
-    analyser = actx.createAnalyser();
-    analyser.fftSize = 4096;
-    analyser.minDecibels = -90;
-    analyser.maxDecibels = -20;
-    freqBytes = new Uint8Array(analyser.frequencyBinCount);
-    timeFloats = new Float32Array(analyser.fftSize);
-  }
-  analyser.smoothingTimeConstant = S.smoothing;
-  if (actx.state !== "running") actx.resume();
+function makeGraph() {
+  const ctx = new AC();
+  const an = ctx.createAnalyser();
+  an.fftSize = 4096;
+  an.minDecibels = -90;
+  an.maxDecibels = -20;
+  an.smoothingTimeConstant = S.smoothing;
+  const mute = ctx.createGain();
+  mute.gain.value = 0;
+  an.connect(mute);
+  mute.connect(ctx.destination);
+  ctx.onstatechange = () => { if (ctx === actx && ctx.state !== "running" && ctx.state !== "closed") resumeAudio(); };
+  return { ctx, an };
+}
+
+function activate(graph) {
+  actx = graph.ctx;
+  analyser = graph.an;
+  freqBytes = new Uint8Array(analyser.frequencyBinCount);
+  timeFloats = new Float32Array(analyser.fftSize);
+  bandMap = null;
+  bassHist.length = 0;
+  resumeAudio();
+}
+
+function resumeAudio() {
+  if (actx && actx.state !== "running" && actx.state !== "closed") actx.resume().catch(() => {});
 }
 
 function setAudioSessionType(type) {
   // Safari 16.4+: "playback" lets file audio play with the silent switch on;
-  // "play-and-record" is what the microphone needs.
-  try { if (navigator.audioSession) navigator.audioSession.type = type; } catch (e) { /* unsupported */ }
+  // "auto" lets Safari pick play-and-record while the microphone is on.
+  try { if (navigator.audioSession && navigator.audioSession.type !== type) navigator.audioSession.type = type; } catch (e) { /* unsupported */ }
 }
 
 async function useMic() {
-  ensureAudio();
+  if (source === "mic" && micStream) return true;
   audioEl.pause();
-  if (micStream) { setSource("mic"); return true; }
+  if (fileGraph) fileGraph.ctx.suspend().catch(() => {});
+  setAudioSessionType("auto");
   try {
-    setAudioSessionType("play-and-record");
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("unsupported");
     micStream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
     });
   } catch (err) {
     showMicError(err);
+    if (source === "file" && fileGraph) resumeAudio();
     return false;
   }
-  micSource = actx.createMediaStreamSource(micStream);
+  micGraph = makeGraph();
+  micGraph.ctx.createMediaStreamSource(micStream).connect(micGraph.an); // analysed only, never played back
+  activate(micGraph);
+  micStream.getAudioTracks().forEach((t) => t.addEventListener("ended", () => {
+    if (source === "mic") toast("Microphone stopped — tap 🎤 to restart");
+  }));
   setSource("mic");
   return true;
 }
 
 function stopMic() {
   if (micStream) micStream.getTracks().forEach((t) => t.stop());
-  if (micSource) micSource.disconnect();
-  micStream = micSource = null;
+  if (micGraph) micGraph.ctx.close().catch(() => {});
+  micStream = micGraph = null;
+}
+
+// Must run inside a tap so iOS lets the context start.
+function prepareFileAudio() {
+  if (source === "mic") stopMic();
+  setAudioSessionType("playback");
+  if (!fileGraph) {
+    fileGraph = makeGraph();
+    const src = fileGraph.ctx.createMediaElementSource(audioEl);
+    src.connect(fileGraph.an);
+    src.connect(fileGraph.ctx.destination);
+  }
+  activate(fileGraph);
 }
 
 function setSource(kind) {
   source = kind;
-  if (micSource) { try { micSource.disconnect(); } catch (e) { /* not connected */ } }
-  if (fileSource) { try { fileSource.disconnect(); } catch (e) { /* not connected */ } }
-  if (kind === "mic") {
-    micSource.connect(analyser); // analysed only, never played back (no feedback)
-  } else {
-    if (!fileSource) fileSource = actx.createMediaElementSource(audioEl);
-    fileSource.connect(analyser);
-    fileSource.connect(actx.destination);
-    stopMic();
-    setAudioSessionType("playback");
-  }
+  silentSince = 0;
+  $("#no-sound").hidden = true;
   $("#btn-source").textContent = kind === "mic" ? "🎤" : "🎵";
   $("#player").hidden = $("#file-btns").hidden = kind !== "file";
   requestWakeLock();
@@ -135,9 +173,9 @@ function setSource(kind) {
 
 function showMicError(err) {
   const name = err && err.name;
-  let msg = "Pulse couldn't access the microphone.";
+  let msg = `Pulse couldn't access the microphone${name ? ` (${name})` : ""}.`;
   if (name === "NotAllowedError") {
-    msg = "Microphone access was denied. On iPhone, open Settings → Safari → Microphone (or tap “aA” in the address bar → Website Settings) and allow it, then try again.";
+    msg = "Microphone access was denied. On iPhone, tap “aA” in the address bar → Website Settings → Microphone → Allow (or Settings → Apps → Safari → Microphone), then try again.";
   } else if (!navigator.mediaDevices) {
     msg = "This browser doesn't support microphone input here. Make sure the page is opened over https.";
   }
@@ -149,14 +187,13 @@ function showMicError(err) {
 
 let playlist = [], trackIdx = 0, objectUrl = null;
 
-function openFiles() { $("#file-input").click(); }
+function openFiles() { prepareFileAudio(); $("#file-input").click(); }
 
 $("#file-input").addEventListener("change", (e) => {
   const files = [...e.target.files];
   e.target.value = "";
   if (!files.length) return;
   playlist = files;
-  ensureAudio();
   setSource("file");
   hideStart();
   playTrack(0);
@@ -171,7 +208,7 @@ function playTrack(i) {
   if (objectUrl) URL.revokeObjectURL(objectUrl);
   objectUrl = URL.createObjectURL(f);
   audioEl.src = objectUrl;
-  audioEl.play().catch(() => {});
+  playAudio();
   $("#track-title").textContent = trackName(f);
   if ("mediaSession" in navigator) {
     navigator.mediaSession.metadata = new MediaMetadata({ title: trackName(f), artist: "Pulse Visualizer" });
@@ -179,10 +216,15 @@ function playTrack(i) {
   showControls();
 }
 
+function playAudio() {
+  resumeAudio();
+  // iOS may refuse to start playback outside a tap (e.g. right after the file picker)
+  audioEl.play().catch(() => { showControls(); toast("Tap ▶︎ to start"); });
+}
+
 function togglePlay() {
   if (source !== "file") return;
-  ensureAudio();
-  if (audioEl.paused) audioEl.play().catch(() => {});
+  if (audioEl.paused) playAudio();
   else audioEl.pause();
 }
 
@@ -204,7 +246,7 @@ $("#seek").addEventListener("change", () => {
 
 if ("mediaSession" in navigator) {
   const ms = navigator.mediaSession;
-  ms.setActionHandler("play", () => audioEl.play());
+  ms.setActionHandler("play", () => playAudio());
   ms.setActionHandler("pause", () => audioEl.pause());
   ms.setActionHandler("previoustrack", () => playTrack(trackIdx - 1));
   ms.setActionHandler("nexttrack", () => playTrack(trackIdx + 1));
@@ -216,7 +258,7 @@ const MAX_BARS = 128;
 const bars = new Float32Array(MAX_BARS);
 const peaks = new Float32Array(MAX_BARS);
 const A = { level: 0, bass: 0, mid: 0, treble: 0, beat: 0, beatCount: 0, lastBeat: 0 };
-let autoPeak = 0.3;
+let autoPeak = 0.3, rawLevel = 0, silentSince = 0;
 const bassHist = [];
 
 function buildBandMap(n) {
@@ -258,6 +300,8 @@ function analyse(now) {
     sum += v;
   }
   const level = sum / n;
+  rawLevel = level;
+  checkSilence(level, now);
 
   // Auto gain keeps quiet rooms and loud speakers both filling the screen.
   autoPeak = Math.max(level, autoPeak * 0.997, 0.04);
@@ -294,6 +338,30 @@ function analyse(now) {
     onBeat();
   }
 }
+
+// If nothing reaches the analyser for a while, say so instead of sitting there flat.
+function checkSilence(level, now) {
+  const expectSound = source === "mic" || (source === "file" && !audioEl.paused);
+  if (!expectSound || level > 0.002) {
+    silentSince = 0;
+    if (!$("#no-sound").hidden && level > 0.002) $("#no-sound").hidden = true;
+    return;
+  }
+  if (!silentSince) silentSince = now;
+  if (now - silentSince > 4000 && $("#no-sound").hidden) {
+    $("#no-sound-text").textContent = source === "mic"
+      ? "No sound is reaching the microphone. Turn the music up and hold the phone near the speaker, or tap here to restart the mic."
+      : "The song is playing but no sound is reaching the visualizer. Tap here to retry.";
+    $("#no-sound").hidden = false;
+  }
+}
+
+$("#no-sound").addEventListener("click", async () => {
+  $("#no-sound").hidden = true;
+  silentSince = 0;
+  if (source === "mic") { stopMic(); source = null; await useMic(); }
+  else { resumeAudio(); if (audioEl.paused) playAudio(); }
+});
 
 /* ---------------- Canvas ---------------- */
 
@@ -636,7 +704,7 @@ function frame(now) {
   if (S.showFps) {
     fpsAcc += dt; fpsFrames++;
     if (fpsAcc > 0.5) { fps = Math.round(fpsFrames / fpsAcc); fpsAcc = 0; fpsFrames = 0; }
-    $("#hud").textContent = `${fps} fps\nlevel ${A.level.toFixed(2)}\ngain ×${(A.gain || 0).toFixed(1)}\nbeats ${A.beatCount}`;
+    $("#hud").textContent = `${fps} fps\nsource ${source || "none"}\naudio ${actx ? `${actx.state} ${actx.sampleRate}Hz` : "off"}\ninput ${rawLevel.toFixed(3)}\nlevel ${A.level.toFixed(2)}\ngain ×${(A.gain || 0).toFixed(1)}\nbeats ${A.beatCount}`;
   }
 }
 requestAnimationFrame(frame);
@@ -704,11 +772,11 @@ stage.addEventListener("pointerup", (e) => {
 });
 
 $("#start-mic").addEventListener("click", async () => { if (await useMic()) hideStart(); });
-$("#start-file").addEventListener("click", () => { ensureAudio(); openFiles(); });
+$("#start-file").addEventListener("click", openFiles);
 $("#mic-error-ok").addEventListener("click", () => { $("#mic-error").hidden = true; });
 $("#btn-source").addEventListener("click", () => openSheet("#source-sheet"));
 $("#src-mic").addEventListener("click", async () => { if (await useMic()) closeSheets(); });
-$("#src-file").addEventListener("click", () => { ensureAudio(); closeSheets(); openFiles(); });
+$("#src-file").addEventListener("click", () => { closeSheets(); openFiles(); });
 $("#btn-prev-mode").addEventListener("click", () => { stepMode(-1); showControls(); });
 $("#btn-next-mode").addEventListener("click", () => { stepMode(1); showControls(); });
 $("#btn-mode").addEventListener("click", () => { stepMode(1); showControls(); });
@@ -856,12 +924,12 @@ async function requestWakeLock() {
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
-    if (actx && actx.state !== "running") actx.resume();
+    resumeAudio();
     requestWakeLock();
   }
 });
 // iOS can suspend the context after interruptions (calls, Siri); a tap brings it back.
-document.addEventListener("pointerdown", () => { if (actx && actx.state !== "running") actx.resume(); });
+document.addEventListener("pointerdown", resumeAudio);
 
 buildSettings();
 setMode(S.mode, false);
